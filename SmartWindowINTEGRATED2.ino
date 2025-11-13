@@ -260,9 +260,6 @@ void applyServoMovement() {
     servo.setServo(servoChannel, openPos);
     currentServoPos = openPos;
   }
-  else {
-    // Closed target, no active movement - motor off
-  }
 }
 
 /**************************************************************

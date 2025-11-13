@@ -226,6 +226,11 @@ void autoLogic() {
     systemState = NORMAL; // ensure we're in normal state
   }
 
+  // If rain stops while closing, immediately stop closing and open
+  if (isClosing && !isRaining) {
+    isClosing = false;
+  }
+
   // When enough time has passed AND no obstacle,
   // assume the window is fully closed and stop "closing" state.
   if (isClosing && !blocked && (millis() - closingStart >= closingDuration)) {

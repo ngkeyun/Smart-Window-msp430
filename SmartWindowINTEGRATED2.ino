@@ -74,7 +74,7 @@ bool          flashState  = false;
 unsigned long closeFlashTimer = 0;
 bool          closeFlashState = false;
 unsigned long closingStart    = 0;
-unsigned long closingDuration = 8000; // ms – 8 seconds for servo to close
+unsigned long closingDuration = 15000; // ms – 15 seconds for servo to close
 
 // Button debounce
 unsigned long lastButtonPress = 0;
@@ -161,8 +161,6 @@ void loop() {
 
   /********** 6. NORMAL DISPLAY **********/
   drawNormalDisplay();
-
-  delay(100);
 }
 
 /**************************************************************

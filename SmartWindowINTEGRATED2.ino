@@ -49,8 +49,7 @@ int currentServoPos = openPos; // track current servo position
 //  State Variables
 enum SystemState {
   NORMAL,           // Normal operation
-  EMERGENCY_ACTIVE, // Emergency stop active (servo motor off)
-  OBSTACLE_BLOCKED  // Obstacle detected while closing (servo motor off)
+  EMERGENCY_ACTIVE  // Emergency stop active (servo motor off) - HIGHEST PRIORITY
 };
 
 SystemState systemState = NORMAL;
@@ -75,7 +74,7 @@ bool          flashState  = false;
 unsigned long closeFlashTimer = 0;
 bool          closeFlashState = false;
 unsigned long closingStart    = 0;
-unsigned long closingDuration = 4000; // ms – adjust to match your servo closing time
+unsigned long closingDuration = 8000; // ms – 8 seconds for servo to close
 
 // Button debounce
 unsigned long lastButtonPress = 0;
@@ -174,13 +173,10 @@ void handleButtonPress() {
     // Reset from emergency back to normal
     systemState = NORMAL;
     isClosing = false;
-  } else if (systemState == OBSTACLE_BLOCKED) {
-    // Reset from obstacle back to normal
-    systemState = NORMAL;
-    isClosing = false;
   } else {
-    // Trigger emergency stop
+    // Trigger emergency stop - HIGHEST PRIORITY STATE
     systemState = EMERGENCY_ACTIVE;
+    isClosing = false;
     // Motor turns off at current position
   }
 }
@@ -212,19 +208,7 @@ void readDistance() {
   int mm = distanceSensor.readRangeContinuousMillimeters();
 
   // Obstacle if something < 100mm (10cm) and valid reading
-  bool wasBlocked = blocked;
   blocked = (mm > 0 && mm < 100);
-
-  // If obstacle detected while closing, enter OBSTACLE_BLOCKED state
-  if (isClosing && blocked && !wasBlocked) {
-    systemState = OBSTACLE_BLOCKED;
-    // Motor turns off at current position
-  }
-
-  // If obstacle cleared and in OBSTACLE_BLOCKED state, resume normal
-  if (!blocked && systemState == OBSTACLE_BLOCKED) {
-    systemState = NORMAL;
-  }
 }
 
 /**************************************************************
@@ -258,10 +242,10 @@ void autoLogic() {
  **************************************************************/
 void applyServoMovement() {
   if (systemState == EMERGENCY_ACTIVE) {
-    // Emergency: motor is off - no command sent
+    // Emergency: motor is off - no command sent (HIGHEST PRIORITY)
   }
-  else if (systemState == OBSTACLE_BLOCKED) {
-    // Obstacle detected: motor is off - no command sent
+  else if (isClosing && blocked) {
+    // Obstacle detected while closing: motor is off - no command sent
   }
   else if (isClosing) {
     // Closing: drive servo to close position
@@ -356,4 +340,6 @@ void drawEmergencyStop() {
   display.print("STOP!!!");
   display.setCursor(29, 27);  // slight offset for "bold" effect
   display.print("STOP!!!");
+  display.setCursor(15, 50);
+  display.print("Press to RESET");
 }

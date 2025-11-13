@@ -11,10 +11,9 @@
  * Features:
  - AUTO MODE: Opens/closes window based on moisture ("rain")
  - POSITION MEMORY: Servo stops at exact position on emergency/obstacle
- - RESET: Press button again after emergency to resume normal operation
- - SAFETY (Option B): Distance sensor blocks closing
+ - SAFETY: Distance sensor blocks closing and stops servo at that position
  - AUTO MODE TOGGLE: TinyScreen Upper-Right button
- - EMERGENCY STOP: Wireling button on Port 0 (toggle with reset)
+ - EMERGENCY STOP: Wireling button on Port 0 (stops servo at current position)
  */
 
 #include <Wire.h>
@@ -43,17 +42,15 @@ ServoDriver servo(NO_R_REMOVED);
 const int servoChannel = 1;
 const int closePos = 1000;    // microseconds for closed
 const int openPos  = 2000;    // microseconds for open
-const int stopPos  = 1500;    // neutral/stop pulse
 
 // SERVO POSITION TRACKING
-int currentServoPos = stopPos; // track current servo position
-int savedServoPos   = stopPos; // saved position when stopped
+int currentServoPos = openPos; // track current servo position
 
 //  State Variables
 enum SystemState {
   NORMAL,           // Normal operation
-  EMERGENCY_ACTIVE, // Emergency stop active (servo held)
-  OBSTACLE_BLOCKED  // Obstacle detected while closing (servo held)
+  EMERGENCY_ACTIVE, // Emergency stop active (servo motor off)
+  OBSTACLE_BLOCKED  // Obstacle detected while closing (servo motor off)
 };
 
 SystemState systemState = NORMAL;
@@ -132,7 +129,7 @@ void loop() {
   // If emergency active: show flashing STOP and freeze everything
   if (systemState == EMERGENCY_ACTIVE) {
     drawEmergencyStop();
-    // Do not send servo command - motor stays off at current position
+    // Motor is off - no servo command sent
     return;  // skip sensors, auto logic, etc.
   }
 
@@ -152,7 +149,7 @@ void loop() {
   // When manualMode == true, AUTO MODE is OFF.
   // Servo is stopped, and user may manually push the window.
   if (manualMode) {
-    servo.setServo(servoChannel, stopPos);  // stop pulse (motor not driving)
+    // Motor is off - no servo command sent
     drawManualDisplay();                    // "AUTO MODE OFF"
     return;                                 // skip auto logic and servo movement
   }
@@ -184,8 +181,7 @@ void handleButtonPress() {
   } else {
     // Trigger emergency stop
     systemState = EMERGENCY_ACTIVE;
-    savedServoPos = currentServoPos; // save current position
-    servo.setServo(servoChannel, savedServoPos);
+    // Motor turns off at current position
   }
 }
 
@@ -222,7 +218,7 @@ void readDistance() {
   // If obstacle detected while closing, enter OBSTACLE_BLOCKED state
   if (isClosing && blocked && !wasBlocked) {
     systemState = OBSTACLE_BLOCKED;
-    savedServoPos = currentServoPos; // save current position
+    // Motor turns off at current position
   }
 
   // If obstacle cleared and in OBSTACLE_BLOCKED state, resume normal
@@ -262,12 +258,10 @@ void autoLogic() {
  **************************************************************/
 void applyServoMovement() {
   if (systemState == EMERGENCY_ACTIVE) {
-    // Emergency: hold at saved position, no command sent (motor off)
-    // Do not send any servo command to turn off the motor
+    // Emergency: motor is off - no command sent
   }
   else if (systemState == OBSTACLE_BLOCKED) {
-    // Obstacle detected: hold at saved position, no command sent (motor off)
-    // Do not send any servo command to turn off the motor
+    // Obstacle detected: motor is off - no command sent
   }
   else if (isClosing) {
     // Closing: drive servo to close position
@@ -275,14 +269,12 @@ void applyServoMovement() {
     currentServoPos = closePos;
   }
   else if (windowOpen) {
-    // Opening: no safety needed, just open
+    // Opening: drive servo to open position
     servo.setServo(servoChannel, openPos);
     currentServoPos = openPos;
   }
   else {
-    // Closed target, no active movement; keep stopped
-    servo.setServo(servoChannel, stopPos);
-    currentServoPos = stopPos;
+    // Closed target, no active movement - motor off
   }
 }
 
@@ -314,7 +306,7 @@ void drawNormalDisplay() {
   display.print("Mode: ");
   display.print("AUTO");
 
-  // Show state if not normal
+  // Show if blocked
   if (blocked) {
     display.setCursor(70, 56);
     display.print("BLK");

@@ -1,7 +1,8 @@
 /************************************************************************
  * Complete Servo/Sensor Project
  *
- * This sketch implements the full state machine logic.
+ * This sketch implements the full state machine logic. Attributions: source codes from 
+ tinycircuit, some help with logic from ChatGPT.
  *
  * LIBRARIES USED (from user's correct file):
  * - TinyScreen.h
@@ -11,7 +12,7 @@
  *
  * HARDWARE ASSUMPTIONS:
  * - TinyScreen+
- * - ASD2303 Servo Controller is a stacked TinyShield (NOT a Wireling)
+ * - ASD2303 Servo Controller is a stacked TinyShield 
  * - Port 0: AST1028 Button Wireling
  * - Port 1: ATtiny25 Moisture Sensor Wireling
  * - Port 3: VL53L0X Distance Sensor Wireling
@@ -483,4 +484,5 @@ void updateScreen() {
       display.print(currentServoPos);
     }
   }
+
 }

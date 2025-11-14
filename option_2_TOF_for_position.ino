@@ -1,7 +1,8 @@
 /************************************************************************
  * Complete Servo/Sensor Project
  *
- * This sketch implements the full state machine logic.
+ * This sketch implements the full state machine logic. Attributions: source codes from 
+ tinycircuit, some help with logic from ChatGPT.
  *
  * *** NEW LOGIC v10 ***
  * - Scraps the "deadzone" and "idle" states.
@@ -350,4 +351,5 @@ void updateScreen() {
     display.print("Servo: ");
     display.print(currentServoPos);
   }
+
 }

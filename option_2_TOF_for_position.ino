@@ -1,108 +1,80 @@
-/************************************************************************
- * Complete Servo/Sensor Project
- *
- * This sketch implements the full state machine logic. Attributions: source codes from 
- tinycircuit, some help with logic from ChatGPT.
- *
- * *** NEW LOGIC v10 ***
- * - Scraps the "deadzone" and "idle" states.
- * - Uses a single "STATE_AUTO_ACTIVE" that constantly seeks its
- * target position (wet or dry).
- * - This fixes the "stuck in homing" loop.
- * - Uses the new user-provided calibration data.
- *
- ************************************************************************/
-
-// --- Core Libraries ---
+//Core Libraries
 #include <Wire.h>
 #include <SPI.h>
 #include <Wireling.h>
 
-// --- Screen Library ---
-#include <TinyScreen.h>   // The screen library we know works
+//Screen Library
+#include <TinyScreen.h>
 
-// --- Component Libraries ---
+//Component Libraries
 #include <ATtiny25.h>     // For Moisture Sensor
 #include <VL53L0X.h>      // For Time of Flight Sensor
-#include <ServoDriver.h>  // For Servo Controller (PCA9685 chip)
+#include <ServoDriver.h>  // For Servo Controller
 
-
-// =======================================================================
-// ===                   !!! USER CONFIGURATION !!!                    ===
-// =======================================================================
-
-// --- 1. PORT NUMBERS (from your file) ---
-#define PORT_BUTTON   0
+//PORT NUMBERS
+#define PORT_BUTTON   3
 #define PORT_MOISTURE 1
-#define PORT_DISTANCE 3
+#define PORT_DISTANCE 0
 
-// --- 2. SET SENSOR THRESHOLDS (from your file) ---
-#define MOISTURE_WET_PERCENT 5   // "isRaining = (moisturePercent > 5)"
-#define MOISTURE_DRY_PERCENT 4   // Back to 4. Hysteresis is less important now.
+//SENSOR THRESHOLDS
+#define MOISTURE_WET_PERCENT 5
+#define MOISTURE_DRY_PERCENT 4
 
-// --- 3. SET SERVO CONSTANTS (from user calibration) ---
-// *** NEW CALIBRATION DATA ***
-#define closePos 1000  // "Wet" position (closing for rain)
-#define openPos  2000  // "Dry" position (opening for sun)
+//SERVO CONSTANTS
+#define closePos 1090 //for when it's raining
+#define openPos  1950 // for when it's dry
 const int servoChannel = 1;
 
-// --- 4. !!! NEW CALIBRATION (from user calibration) !!! ---
-// *** NEW CALIBRATION DATA ***
-// openPos (1900) is at 20mm
-// closePos (1050) is at 99mm
-#define TOF_DIST_AT_OPEN_POS  10  // (mm) User calibrated
-#define TOF_DIST_AT_CLOSE_POS 80  // (mm) User calibrated
+//TOF CONSTANTS
+#define TOF_DIST_AT_OPEN_POS  10  //distance in mm
+#define TOF_DIST_AT_CLOSE_POS 75
 
-// --- 5. SERVO DEADZONE (REMOVED) ---
-// const int TOF_DEADZONE_MM = 15; // <-- We no longer need this
-
-// --- 6. SET SERVO SPEED (NON-BLOCKING) ---
+//SERVO SPEED
 #define SERVO_MOVE_INTERVAL 50  // Move servo every 20ms (50 steps/sec)
-#define SERVO_STEP_SIZE     15   // Move 5 units each step (tune this for speed)
+#define SERVO_STEP_SIZE     15   // Move 15 units each step
 
-// =======================================================================
-// ===               HARDWARE & STATE OBJECTS                          ===
-// =======================================================================
+//SCREEN CONSTANTS
+#define FLASH_INTERVAL 200  //flashing rate of opening and closing alerts, in ms
 
-// --- Hardware Objects (from your file) ---
+//Hardware Objects
 TinyScreen display = TinyScreen(TinyScreenPlus);
 ATtiny25     moistureSensor;
 VL53L0X      distanceSensor;
 ServoDriver  servo(NO_R_REMOVED);
 
-// --- System State Variables ---
+//System State Variables
 enum SystemMode {
   MODE_MANUAL,
   MODE_AUTO
 };
 SystemMode currentSystemMode = MODE_MANUAL;
 
-// --- NEW, SIMPLIFIED STATES ---
 enum AutoState {
   STATE_AUTO_ACTIVE,  // This state now does all the work
   STATE_INTERRUPTED
 };
 AutoState currentAutoState = STATE_AUTO_ACTIVE; // Start in this state
 
-// --- Global Sensor/Control Variables ---
+//global Sensor/Control Variables
 int   currentMoistureRaw     = 0;
 int   currentMoisturePercent = 0;
 int   currentDistance        = 0;
 bool  interruptBtnPressed    = false;
-int   currentServoPos        = openPos; // Start at the "Dry" (open) position
+int   currentServoPos        = openPos; //start at open position (dry)
 bool  tofSensorOK            = false;
 bool  hasSyncedFromManual    = false; // Flag to sync position once
 
-// --- Non-Blocking Timer & Button Latch Variables ---
+//Non-Blocking Timer & Button Latch Variables
 unsigned long lastServoMoveTime = 0;
 bool lastModeBtnState     = false;
 bool lastInterruptBtnState = false;
 
-// =======================================================================
-// ===                           SETUP                                 ===
-// =======================================================================
+
+
+
+
 void setup() {
-  // --- Initialize I2C and Hardware ---
+  //Initialize Hardware
   Wire.begin();
   display.begin();
   Wireling.begin();
@@ -111,7 +83,7 @@ void setup() {
   display.setFont(thinPixel7_10ptFontInfo); // Set font
   display.fontColor(TS_8b_White, TS_8b_Black);
 
-  // --- Initialize All Wireling Components ---
+  //Initialize all wireling components
   Wireling.selectPort(PORT_MOISTURE);
   Wireling.selectPort(PORT_BUTTON);
   Wireling.selectPort(PORT_DISTANCE);
@@ -125,28 +97,26 @@ void setup() {
     tofSensorOK = false;
   }
 
-  // --- Initialize Stacked Servo Controller ---
+  //Initialise servo
   servo.useResetPin();
   servo.begin(20000);
-  servo.setServo(servoChannel, openPos); // Go to start pos
+  servo.setServo(servoChannel, openPos); // Go to start position, which is open (dry)
   currentServoPos = openPos;
 
-  // --- Relax servo on startup ---
+  //Relax servo on startup by having 0 output on servo channel
   servo.setServo(servoChannel, 0); 
 }
 
-// =======================================================================
-// ===                         MAIN LOOP                               ===
-// =======================================================================
+
+//main loop
 void loop() {
-  // 1. Check for a mode change (Manual/Auto)
+  //Check for a mode change (Manual/Auto)
   checkModeButton();
 
-  // 2. Run logic based on the current mode
+  //Run logic based on the current mode
   if (currentSystemMode == MODE_AUTO) {
     readAllSensors();
     
-    // --- "STUCK IN HOMING" BUG FIX ---
     Wireling.selectPort(0xFFFF); 
     
     runAutoStateMachine();
@@ -154,23 +124,16 @@ void loop() {
     runManualMode();
   }
 
-  // 3. Update the screen with the latest info
+  //Update the screen with the latest info
   updateScreen();
 }
 
-// =======================================================================
-// ===                    HELPER FUNCTIONS                             ===
-// =======================================================================
-
-/**
- * @brief Checks the TinyScreen+ top-right button for a mode change.
- */
+//Checks the TinyScreen+ top-right button for a mode change.
 void checkModeButton() {
   bool modeBtnState = display.getButtons(TSButtonUpperRight);
   if (modeBtnState == true && lastModeBtnState == false) {
     if (currentSystemMode == MODE_MANUAL) {
       currentSystemMode = MODE_AUTO;
-      // --- NEW ---
       // We are entering AUTO, so we must sync.
       currentAutoState = STATE_AUTO_ACTIVE; 
       hasSyncedFromManual = false; // Flag that we need to sync
@@ -183,32 +146,34 @@ void checkModeButton() {
   lastModeBtnState = modeBtnState;
 }
 
-/**
- * @brief Reads all sensors and stores values in global variables.
- */
+//Reads all sensors and stores values in global variables.
 void readAllSensors() {
-  // --- Read Moisture ---
+  //Moisture
   Wireling.selectPort(PORT_MOISTURE);
   currentMoistureRaw = moistureSensor.readMoisture();
   currentMoisturePercent = map(currentMoistureRaw, 0, 1023, 0, 100);
   currentMoisturePercent = constrain(currentMoisturePercent, 0, 100);
 
-  // --- Read ToF Sensor (Continuous, Non-Blocking) ---
-  if (tofSensorOK) {
+  //Read ToF Sensor (Continuous, Non-Blocking)
+  if(tofSensorOK){
     Wireling.selectPort(PORT_DISTANCE);
     int distance = distanceSensor.readRangeContinuousMillimeters();
-    if (distance > 0 && distance < 8190) { 
+    if (distance > 0 && distance < 8190) {  //remove common invalid readings, usually 8191 means out of range
       currentDistance = distance; // Update the global variable
     }
   } else {
     currentDistance = 0;
   }
 
-  // --- Read Interrupt Button (Analog method) ---
+  const int interruptBtnport[] = {A0, A1, A2, A3}; //lookup table, allows easy changing of emergency button port number at the top of code
+
+
+  //Read Interrupt Button
   Wireling.selectPort(PORT_BUTTON);
-  int buttonValue = analogRead(A0); 
-  bool interruptBtnState = (buttonValue < 100);
-  
+  int buttonValue = analogRead(interruptBtnport[PORT_BUTTON]);  //PORT_BUTTON is the port number for the emergency button, can be changed and found at the top of the code
+  bool interruptBtnState = (buttonValue < 100); 
+  //since button reading is active low. when button is not pressed, value is >1000. when button is pressed, value is much lower, but may not be zero, so we use 100 as a safer threshold
+
   if (interruptBtnState == true && lastInterruptBtnState == false) {
     interruptBtnPressed = true;
   } else {
@@ -217,47 +182,39 @@ void readAllSensors() {
   lastInterruptBtnState = interruptBtnState;
 }
 
-/**
- * @brief Logic for when the system is in MANUAL mode. (Does nothing)
- */
+//Logic for when the system is in MANUAL mode
 void runManualMode() {
-  // We do nothing, servo is relaxed.
+  //do nothing, let servo move freely
 }
 
-/**
- * @brief The main state machine logic for AUTO mode.
- */
+//The main state machine logic for AUTO mode
 void runAutoStateMachine() {
   
   unsigned long currentTime = millis();
   bool servoMoveTime = (currentTime - lastServoMoveTime >= SERVO_MOVE_INTERVAL);
 
-  // --- State Machine Logic ---
+  //state Machine Logic
   switch (currentAutoState) {
 
-    // --- THIS IS NOW THE ONLY "ACTIVE" STATE ---
     case STATE_AUTO_ACTIVE:
-      // --- Step 1: Sync position from ToF (runs ONCE) ---
-      if (!hasSyncedFromManual) {
-        if (tofSensorOK && currentDistance > 0) { 
+      //Sync position from ToF
+      if (!hasSyncedFromManual) { //if has NOT synced from manual
+        if (tofSensorOK && currentDistance > 0) {   //and if TOF sensor is up and working
           // The read is good! Use it to find our position.
-          // *** NEW MAPPING ***
-          // (dist, 20, 99, 1900, 1050)
-          currentServoPos = map(currentDistance, TOF_DIST_AT_OPEN_POS, TOF_DIST_AT_CLOSE_POS, openPos, closePos);
+          currentServoPos = map(currentDistance, TOF_DIST_AT_OPEN_POS, TOF_DIST_AT_CLOSE_POS, openPos, closePos); 
           currentServoPos = constrain(currentServoPos, min(closePos, openPos), max(closePos, openPos));
         }
-        // If ToF failed, we just use the last known currentServoPos,
-        // which prevents the "snap".
-        hasSyncedFromManual = true; // We are now synced!
+        // If ToF failed, we just use the last known currentServoPos so servo doesn't jump position
+        hasSyncedFromManual = true;
       }
 
-      // --- Step 2: Check for interrupt button ---
+      //Step 2: Check for interrupt button
       if (interruptBtnPressed) {
         currentAutoState = STATE_INTERRUPTED;
         break; // Exit this state
       }
 
-      // --- Step 3: Determine our target position based on moisture ---
+      //Step 3: Determine our target position based on moisture
       int targetPos;
       if (currentMoisturePercent >= MOISTURE_WET_PERCENT) {
         targetPos = closePos; // Target is 1050 (Wet)
@@ -265,7 +222,7 @@ void runAutoStateMachine() {
         targetPos = openPos;  // Target is 1900 (Dry)
       }
 
-      // --- Step 4: Seek the target position ---
+      //Step 4: Seek the target position
       if (servoMoveTime) {
         
         if (currentServoPos < targetPos) { // Need to move "up" (to openPos)
@@ -301,21 +258,19 @@ void runAutoStateMachine() {
   }
 }
 
-/**
- * @brief Updates the TinyScreen+ display with the current system status.
- */
+//Updates the TinyScreen+ display with the current system status.
 void updateScreen() {
   display.clearScreen();
   display.fontColor(TS_8b_White, TS_8b_Black);
 
-  // --- Display Mode ---
+  //Display Mode
   display.setCursor(0, 0);
   if (currentSystemMode == MODE_MANUAL) {
     display.print("Mode: MANUAL");
   } else {
     display.print("Mode: AUTO");
     
-    // --- Display Auto State ---
+    //Display Auto State
     display.setCursor(0, 10);
     display.print("State: ");
     switch (currentAutoState) {
@@ -332,7 +287,7 @@ void updateScreen() {
       case STATE_INTERRUPTED:    display.print("STOPPED"); break;
     }
 
-    // --- Display Sensor Values ---
+    //Display Sensor Values
     display.setCursor(0, 30);
     display.print("Moisture: ");
     display.print(currentMoisturePercent);
@@ -351,5 +306,4 @@ void updateScreen() {
     display.print("Servo: ");
     display.print(currentServoPos);
   }
-
 }
